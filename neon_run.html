@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>NEON DRIFT // ARCADE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #04040d;
+      --grid: #ff007f;
+      --ball: #00f3ff;
+      --obs: #ff2a55;
+      --orb: #ffe600;
+      --text: #ffffff;
+      --panel: rgba(8, 10, 26, 0.72);
+      --border: rgba(0, 243, 255, 0.35);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+    body, html {
+      width: 100%; height: 100%; overflow: hidden;
+      background: var(--bg); color: var(--text);
+      font-family: 'Rajdhani', system-ui, sans-serif;
+      touch-action: manipulation;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* CRT Scanline & Vignette Polish */
+    .crt-overlay {
+      position: fixed; inset: 0; pointer-events: none; z-index: 50;
+      background:
+        radial-gradient(circle at center, transparent 58%, rgba(0, 0, 0, 0.65) 100%),
+        repeating-linear-gradient(0deg, rgba(0,0,0,0.14) 0px, rgba(0,0,0,0.14) 1px, transparent 1px, transparent 3px);
+    }
+
+    /* HUD */
+    #ui {
+      position: absolute; inset: 0; pointer-events: none; z-index: 10;
+      display: flex; flex-direction: column; justify-content: space-between;
+      padding: clamp(14px, 3vw, 28px);
+    }
+    .hud-top {
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+    }
+    .hud-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+      padding: 10px 18px;
+      clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+      box-shadow: 0 0 24px rgba(0, 243, 255, 0.12), inset 0 0 12px rgba(0, 243, 255, 0.08);
+    }
+    .score-label {
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 2.5px;
+      color: var(--ball); text-transform: uppercase; opacity: 0.85;
+    }
+    .score-box {
+      font-family: 'Orbitron', sans-serif;
+      font-size: clamp(1.8rem, 4.5vw, 2.8rem); font-weight: 900; letter-spacing: 2px;
+      line-height: 1.05; color: #fff;
+      text-shadow: 0 0 14px var(--ball);
+    }
+    .combo-row {
+      display: flex; align-items: center; gap: 10px; margin-top: 4px;
+      font-size: 0.85rem; font-weight: 700; letter-spacing: 1.5px;
+    }
+    .combo-pill {
+      background: rgba(255, 230, 0, 0.16); border: 1px solid var(--orb);
+      color: var(--orb); padding: 1px 8px; border-radius: 3px;
+      text-shadow: 0 0 8px var(--orb);
+    }
+    .best-txt { color: rgba(255,255,255,0.75); }
+
+    .status-stack {
+      display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+    }
+    .status-chip {
+      background: var(--panel); border: 1px solid rgba(255, 0, 127, 0.45);
+      padding: 6px 14px; font-size: 0.78rem; font-weight: 700; letter-spacing: 2px;
+      text-transform: uppercase;
+      clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+    }
+    .status-chip.ghost { border-color: rgba(0, 243, 255, 0.45); color: var(--ball); }
+
+    .powerups { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .badge {
+      padding: 4px 10px; font-size: 0.72rem; font-weight: 700; letter-spacing: 1.5px;
+      background: rgba(0,0,0,0.65); border: 1px solid currentColor;
+      text-transform: uppercase; box-shadow: 0 0 12px currentColor;
+      clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+      animation: pulseBadge 0.9s infinite alternate;
+    }
+    @keyframes pulseBadge { from { opacity: 0.75; } to { opacity: 1; } }
+
+    .hud-bottom {
+      display: flex; justify-content: space-between; align-items: flex-end;
+    }
+    .speed-meter {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--panel); border: 1px solid var(--border);
+      padding: 6px 14px; font-size: 0.75rem; font-weight: 700; letter-spacing: 2px;
+      clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+    }
+    .speed-bars { display: flex; gap: 3px; }
+    .speed-bar {
+      width: 5px; height: 12px; background: rgba(255,255,255,0.15);
+      transform: skewX(-18deg); transition: background 0.15s, box-shadow 0.15s;
+    }
+    .speed-bar.active { background: var(--ball); box-shadow: 0 0 8px var(--ball); }
+    .speed-bar.hot { background: var(--obs); box-shadow: 0 0 8px var(--obs); }
+
+    #muteBtn {
+      pointer-events: auto; cursor: pointer;
+      background: var(--panel); border: 1px solid var(--border);
+      color: var(--ball); font-family: 'Orbitron', sans-serif;
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 1.5px;
+      padding: 8px 14px; clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px);
+    }
+    #muteBtn:hover { background: var(--ball); color: #04040d; }
+
+    /* OVERLAY SCREENS */
+    .overlay {
+      position: absolute; inset: 0; z-index: 20;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(circle at center, rgba(10, 12, 32, 0.72) 0%, rgba(3, 3, 10, 0.92) 100%);
+      backdrop-filter: blur(8px);
+      pointer-events: auto; padding: 20px;
+      transition: opacity 0.25s ease;
+    }
+    .hidden { display: none !important; }
+
+    .arcade-panel {
+      width: 100%; max-width: 520px;
+      background: linear-gradient(165deg, rgba(14, 18, 44, 0.92), rgba(6, 7, 20, 0.96));
+      border: 1px solid rgba(0, 243, 255, 0.45);
+      padding: clamp(22px, 4vw, 36px);
+      position: relative; text-align: center;
+      clip-path: polygon(0 0, calc(100% - 24px) 0, 100% 24px, 100% 100%, 24px 100%, 0 calc(100% - 24px));
+      box-shadow: 0 0 50px rgba(0, 243, 255, 0.16), inset 0 0 30px rgba(255, 0, 127, 0.08);
+    }
+    .arcade-panel::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg, var(--ball), var(--grid), var(--orb));
+    }
+
+    .kicker {
+      font-family: 'Orbitron', sans-serif; font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 4px; color: var(--grid); text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    h1 {
+      font-family: 'Orbitron', sans-serif;
+      font-size: clamp(2.4rem, 7vw, 3.8rem); font-weight: 900; letter-spacing: 5px;
+      line-height: 1;
+      background: linear-gradient(180deg, #ffffff 15%, var(--ball) 65%, var(--grid) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 20px rgba(0, 243, 255, 0.45));
+      margin-bottom: 12px;
+    }
+    .subtitle {
+      font-size: 0.98rem; font-weight: 500; color: rgba(255, 255, 255, 0.8);
+      line-height: 1.45; margin-bottom: 22px;
+    }
+    .key-hint {
+      display: inline-block; padding: 1px 7px; margin: 0 2px;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 3px; font-family: 'Orbitron', sans-serif; font-size: 0.72rem; color: var(--orb);
+    }
+
+    .btn-stack {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;
+    }
+    @media (max-width: 440px) { .btn-stack { grid-template-columns: 1fr; } }
+
+    button.cyber-btn {
+      cursor: pointer; position: relative;
+      font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: 0.88rem;
+      letter-spacing: 1.8px; text-transform: uppercase;
+      padding: 15px 18px; border: none; color: #04040d;
+      background: linear-gradient(135deg, var(--ball), #00b8ff);
+      clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+      box-shadow: 0 0 20px rgba(0, 243, 255, 0.4);
+      transition: transform 0.14s ease, filter 0.14s ease, box-shadow 0.14s ease;
+    }
+    button.cyber-btn:hover {
+      transform: translateY(-2px) scale(1.02);
+      filter: brightness(1.15);
+      box-shadow: 0 0 28px rgba(0, 243, 255, 0.75);
+    }
+    button.cyber-btn:active { transform: translateY(1px) scale(0.99); }
+
+    button.cyber-btn.secondary {
+      background: linear-gradient(135deg, #ff007f, #ff4d4d);
+      color: #fff;
+      box-shadow: 0 0 20px rgba(255, 0, 127, 0.35);
+    }
+    button.cyber-btn.secondary:hover {
+      box-shadow: 0 0 28px rgba(255, 0, 127, 0.75);
+    }
+
+    .section-divider {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 2.5px;
+      color: rgba(255,255,255,0.45); text-transform: uppercase;
+      margin: 14px 0 10px;
+    }
+    .section-divider::before, .section-divider::after {
+      content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.14);
+    }
+
+    /* THEME CHIPS */
+    .themes {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+    }
+    .theme-btn {
+      cursor: pointer; background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.16); color: rgba(255,255,255,0.5);
+      padding: 8px 6px; font-family: 'Rajdhani', sans-serif;
+      font-weight: 700; font-size: 0.78rem; letter-spacing: 1px; text-transform: uppercase;
+      clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+      transition: all 0.15s;
+    }
+    .theme-btn.unlocked { color: #fff; border-color: rgba(255,255,255,0.35); }
+    .theme-btn.unlocked:hover { background: rgba(255,255,255,0.12); }
+    .theme-btn.selected {
+      background: rgba(255, 230, 0, 0.15); border-color: var(--orb);
+      color: var(--orb); box-shadow: inset 0 0 12px rgba(255, 230, 0, 0.25);
+    }
+
+    /* CHALLENGE CODE INPUT */
+    .share-box {
+      display: flex; align-items: stretch;
+      background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(0, 243, 255, 0.3);
+      clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+    }
+    .share-box input {
+      flex: 1; background: transparent; border: none; color: var(--orb);
+      font-family: 'Orbitron', monospace; font-size: 0.78rem; padding: 10px 12px;
+      outline: none; letter-spacing: 1px;
+    }
+    .share-box button {
+      cursor: pointer; background: rgba(0, 243, 255, 0.18); border: none;
+      border-left: 1px solid rgba(0, 243, 255, 0.3); color: var(--ball);
+      font-family: 'Orbitron', sans-serif; font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 1.5px; padding: 0 14px; text-transform: uppercase;
+      transition: background 0.15s, color 0.15s;
+    }
+    .share-box button:hover { background: var(--ball); color: #04040d; }
+
+    /* GAME OVER STATS GRID */
+    .stats-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+      margin: 16px 0 20px;
+    }
+    .stat-tile {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
+      padding: 12px;
+      clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+    }
+    .stat-tile .val {
+      font-family: 'Orbitron', sans-serif; font-size: 1.7rem; font-weight: 900;
+      color: var(--ball); text-shadow: 0 0 12px rgba(0,243,255,0.4);
+    }
+    .stat-tile.best .val { color: var(--orb); text-shadow: 0 0 12px rgba(255,230,0,0.4); }
+    .stat-tile .lbl {
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 2px;
+      color: rgba(255,255,255,0.6); text-transform: uppercase; margin-top: 2px;
+    }
+    .record-banner {
+      background: linear-gradient(90deg, transparent, rgba(255, 230, 0, 0.22), transparent);
+      border-top: 1px solid var(--orb); border-bottom: 1px solid var(--orb);
+      color: var(--orb); font-family: 'Orbitron', sans-serif; font-size: 0.78rem;
+      font-weight: 700; letter-spacing: 2px; padding: 6px; margin-bottom: 16px;
+    }
+
+    /* FLOATING SCORE POPUPS */
+    #floatLayer {
+      position: absolute; inset: 0; pointer-events: none; z-index: 15; overflow: hidden;
+    }
+    .float-txt {
+      position: absolute; font-family: 'Orbitron', sans-serif; font-weight: 900;
+      font-size: 1rem; letter-spacing: 1px; transform: translate(-50%, -50%);
+      animation: floatUp 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      text-shadow: 0 0 10px currentColor;
+    }
+    @keyframes floatUp {
+      0% { opacity: 1; transform: translate(-50%, -50%) scale(0.8); }
+      100% { opacity: 0; transform: translate(-50%, -130%) scale(1.15); }
+    }
+
+    #toast {
+      position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+      background: var(--ball); color: #04040d; font-family: 'Orbitron', sans-serif;
+      font-weight: 700; padding: 10px 22px; font-size: 0.78rem; letter-spacing: 1.5px;
+      clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+      box-shadow: 0 0 24px var(--ball); opacity: 0; transition: opacity 0.25s;
+      pointer-events: none; z-index: 99; text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div class="crt-overlay"></div>
+  <div id="floatLayer"></div>
+
+  <div id="ui">
+    <div class="hud-top">
+      <div class="hud-card">
+        <div class="score-label">Distance Score</div>
+        <div class="score-box" id="scoreDisplay">0000</div>
+        <div class="combo-row">
+          <span class="combo-pill" id="comboPill">x1</span>
+          <span class="best-txt" id="bestHud">BEST 0</span>
+        </div>
+        <div class="powerups" id="powerupHud"></div>
+      </div>
+
+      <div class="status-stack">
+        <div class="status-chip" id="modeBadge">ENDLESS RUN</div>
+        <div class="status-chip ghost" id="ghostBadge">GHOST: OFF</div>
+      </div>
+    </div>
+
+    <div class="hud-bottom">
+      <div class="speed-meter">
+        <span>VELOCITY</span>
+        <div class="speed-bars" id="speedBars">
+          <div class="speed-bar active"></div>
+          <div class="speed-bar active"></div>
+          <div class="speed-bar"></div>
+          <div class="speed-bar"></div>
+          <div class="speed-bar"></div>
+          <div class="speed-bar"></div>
+          <div class="speed-bar"></div>
+          <div class="speed-bar"></div>
+        </div>
+      </div>
+      <button id="muteBtn">SFX: ON</button>
+    </div>
+  </div>
+
+  <!-- START / ARCADE MENU OVERLAY -->
+  <div class="overlay" id="menuOverlay">
+    <div class="arcade-panel">
+      <div class="kicker">SYNTHWAVE ARCADE EDITION</div>
+      <h1>NEON DRIFT</h1>
+      <p class="subtitle">
+        Tap sides or press <span class="key-hint">SPACE</span> <span class="key-hint">A</span> <span class="key-hint">D</span> to shift lanes.
+        Graze barriers for <b style="color:var(--orb)">NEAR-MISS</b> combos & outrun your ghost.
+      </p>
+
+      <div class="btn-stack">
+        <button class="cyber-btn" id="playEndlessBtn">Endless Drift</button>
+        <button class="cyber-btn secondary" id="playDailyBtn">Daily Seed</button>
+      </div>
+
+      <div class="section-divider">Visual Grid Themes</div>
+      <div class="themes" id="themeSelector"></div>
+
+      <div class="section-divider">Rival Ghost Challenge</div>
+      <div class="share-box">
+        <input type="text" id="challengeInput" placeholder="PASTE RIVAL CODE (ND-...)" />
+        <button id="loadCodeBtn">Race</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GAME OVER OVERLAY -->
+  <div class="overlay hidden" id="gameOverOverlay">
+    <div class="arcade-panel">
+      <div class="kicker" style="color:var(--obs);">CRITICAL COLLISION</div>
+      <h1 style="font-size:clamp(2.2rem, 6vw, 3.2rem);">WIPEOUT</h1>
+
+      <div class="record-banner hidden" id="recordBanner">★ NEW PERSONAL RECORD ★</div>
+
+      <div class="stats-grid">
+        <div class="stat-tile">
+          <div class="val" id="finalScoreVal">0</div>
+          <div class="lbl">Final Score</div>
+        </div>
+        <div class="stat-tile best">
+          <div class="val" id="finalBestVal">0</div>
+          <div class="lbl">All-Time Best</div>
+        </div>
+      </div>
+
+      <div class="btn-stack">
+        <button class="cyber-btn" id="retryBtn">Retry Run</button>
+        <button class="cyber-btn secondary" id="menuBtn">Main Menu</button>
+      </div>
+
+      <div class="section-divider">Share Your Ghost Code</div>
+      <div class="share-box">
+        <input type="text" id="shareCodeOut" readonly />
+        <button id="copyCodeBtn">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast">Challenge Code Copied!</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const floatLayer = document.getElementById('floatLayer');
+
+  // --- THEMES ---
+  const THEMES = [
+    { id: 'neon', name: 'Neon', unlock: 0, bg: '#04040d', grid: '#ff007f', road: '#0b0c22', ball: '#00f3ff', obs: '#ff2a55', orb: '#ffe600' },
+    { id: 'sunset', name: 'Sunset', unlock: 500, bg: '#14061c', grid: '#ff7b00', road: '#220a2b', ball: '#ffdd00', obs: '#ff0055', orb: '#00ffd5' },
+    { id: 'matrix', name: 'Matrix', unlock: 1500, bg: '#000802', grid: '#00ff41', road: '#021506', ball: '#b8ffca', obs: '#ff3333', orb: '#00ff41' },
+    { id: 'gameboy', name: 'Retro GB', unlock: 3000, bg: '#0f380f', grid: '#8bac0f', road: '#275227', ball: '#9bbc0f', obs: '#0f380f', orb: '#9bbc0f' }
+  ];
+
+  // --- STORAGE & STATE ---
+  let saveData = JSON.parse(localStorage.getItem('neonDriftSave') || '{}');
+  saveData.best = saveData.best || 0;
+  saveData.theme = saveData.theme || 'neon';
+  saveData.bestGhost = saveData.bestGhost || [];
+  saveData.dailyBest = saveData.dailyBest || {};
+
+  function persist() {
+    localStorage.setItem('neonDriftSave', JSON.stringify(saveData));
+  }
+
+  let currentTheme = THEMES.find(t => t.id === saveData.theme) || THEMES[0];
+  function applyThemeCSS(t) {
+    document.documentElement.style.setProperty('--bg', t.bg);
+    document.documentElement.style.setProperty('--grid', t.grid);
+    document.documentElement.style.setProperty('--ball', t.ball);
+    document.documentElement.style.setProperty('--obs', t.obs);
+    document.documentElement.style.setProperty('--orb', t.orb);
+  }
+  applyThemeCSS(currentTheme);
+
+  // --- SEEDED PRNG ---
+  function mulberry32(a) {
+    return function() {
+      let t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function getTodaySeed() {
+    const d = new Date();
+    return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+  }
+
+  // --- WEB AUDIO SYNTHESIZER ---
+  let audioCtx = null;
+  let beatInterval = null;
+  let step = 0;
+  let muted = false;
+
+  document.getElementById('muteBtn').onclick = () => {
+    muted = !muted;
+    document.getElementById('muteBtn').textContent = muted ? 'SFX: OFF' : 'SFX: ON';
+  };
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function playTone(freq, type, duration, vol = 0.12, slide = 0) {
+    if (!audioCtx || muted) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    if (slide) osc.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + duration);
+    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+  }
+
+  const BASS_NOTES = [55, 55, 65.41, 73.42, 55, 55, 82.41, 73.42];
+  function startMusic() {
+    stopMusic();
+    step = 0;
+    beatInterval = setInterval(() => {
+      if (state !== 'PLAYING') return;
+      if (step % 2 === 0) {
+        playTone(130, 'sine', 0.14, 0.22, 32);
+        pulseBeat = 1.0;
+        spawnBeatEntities(step);
+      }
+      const note = BASS_NOTES[step % BASS_NOTES.length];
+      playTone(note, 'sawtooth', 0.16, 0.065);
+      if (step % 2 === 1) {
+        playTone(6000, 'square', 0.03, 0.018);
+      }
+      step++;
+    }, 240);
+  }
+
+  function stopMusic() {
+    if (beatInterval) clearInterval(beatInterval);
+  }
+
+  // --- GAME VARIABLES ---
+  let state = 'MENU';
+  let mode = 'ENDLESS';
+  let currentSeed = Date.now();
+  let rng = Math.random;
+
+  let width, height;
+  function resize() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  let playerLane = 1;
+  let playerVisualX = 1;
+  let score = 0;
+  let combo = 1;
+  let runTime = 0;
+  let baseSpeed = 15;
+  let speed = 15;
+  let shake = 0;
+  let pulseBeat = 0;
+  let hitFlash = 0;
+
+  let powerups = { slow: 0, shield: false, magnet: 0 };
+  let entities = [];
+  let particles = [];
+  let currentRunLog = [];
+  let activeGhostLog = [];
+  let targetChallengeScore = 0;
+
+  // --- UI ELEMENTS ---
+  const scoreEl = document.getElementById('scoreDisplay');
+  const comboPill = document.getElementById('comboPill');
+  const bestHud = document.getElementById('bestHud');
+  const powerupHud = document.getElementById('powerupHud');
+  const modeBadge = document.getElementById('modeBadge');
+  const ghostBadge = document.getElementById('ghostBadge');
+  const menuOverlay = document.getElementById('menuOverlay');
+  const gameOverOverlay = document.getElementById('gameOverOverlay');
+  const themeSelector = document.getElementById('themeSelector');
+  const speedBars = Array.from(document.querySelectorAll('.speed-bar'));
+
+  bestHud.textContent = `BEST ${saveData.best}`;
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.opacity = 1;
+    setTimeout(() => t.style.opacity = 0, 2100);
+  }
+
+  function spawnFloatingText(x, y, text, color) {
+    const el = document.createElement('div');
+    el.className = 'float-txt';
+    el.textContent = text;
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    el.style.color = color;
+    floatLayer.appendChild(el);
+    setTimeout(() => el.remove(), 760);
+  }
+
+  function renderThemeButtons() {
+    themeSelector.innerHTML = '';
+    THEMES.forEach(t => {
+      const unlocked = saveData.best >= t.unlock;
+      const btn = document.createElement('button');
+      btn.className = `theme-btn ${unlocked ? 'unlocked' : ''} ${currentTheme.id === t.id ? 'selected' : ''}`;
+      btn.textContent = unlocked ? t.name : `${t.unlock} PTS`;
+      btn.onclick = () => {
+        if (!unlocked) return showToast(`Unlock at ${t.unlock} points`);
+        currentTheme = t;
+        applyThemeCSS(t);
+        saveData.theme = t.id;
+        persist();
+        renderThemeButtons();
+      };
+      themeSelector.appendChild(btn);
+    });
+  }
+  renderThemeButtons();
+
+  // --- GAME LIFECYCLE ---
+  function startGame(selectedMode, customSeed = null, ghostData = null, challengeTarget = 0) {
+    initAudio();
+    mode = selectedMode;
+    if (mode === 'DAILY') {
+      currentSeed = getTodaySeed();
+      modeBadge.textContent = `DAILY #${currentSeed}`;
+    } else if (mode === 'CHALLENGE') {
+      currentSeed = customSeed;
+      modeBadge.textContent = `VS RIVAL (${challengeTarget})`;
+    } else {
+      currentSeed = Math.floor(Math.random() * 999999);
+      modeBadge.textContent = 'ENDLESS RUN';
+    }
+
+    rng = mulberry32(currentSeed);
+    playerLane = 1;
+    playerVisualX = 1;
+    score = 0;
+    combo = 1;
+    runTime = 0;
+    baseSpeed = 15;
+    speed = 15;
+    shake = 0;
+    hitFlash = 0;
+    entities = [];
+    particles = [];
+    powerups = { slow: 0, shield: false, magnet: 0 };
+    currentRunLog = [{ t: 0, lane: 1 }];
+    targetChallengeScore = challengeTarget;
+
+    if (ghostData && ghostData.length) {
+      activeGhostLog = ghostData;
+      ghostBadge.textContent = 'GHOST: RIVAL';
+    } else if (saveData.bestGhost.length > 0 && mode === 'ENDLESS') {
+      activeGhostLog = saveData.bestGhost;
+      ghostBadge.textContent = `GHOST: PB (${saveData.best})`;
+    } else {
+      activeGhostLog = [];
+      ghostBadge.textContent = 'GHOST: NONE';
+    }
+
+    state = 'PLAYING';
+    menuOverlay.classList.add('hidden');
+    gameOverOverlay.classList.add('hidden');
+    startMusic();
+  }
+
+  function endGame() {
+    state = 'GAMEOVER';
+    stopMusic();
+    shake = 26;
+    hitFlash = 0.85;
+    playTone(110, 'sawtooth', 0.45, 0.25, 28);
+    spawnExplosion(laneToScreenX(playerVisualX, 0.08), projectY(0.08), currentTheme.obs, 55);
+
+    const finalScore = Math.floor(score);
+    let isNewBest = false;
+    if (finalScore > saveData.best) {
+      saveData.best = finalScore;
+      saveData.bestGhost = currentRunLog;
+      isNewBest = true;
+    }
+    if (mode === 'DAILY') {
+      const key = String(getTodaySeed());
+      saveData.dailyBest[key] = Math.max(saveData.dailyBest[key] || 0, finalScore);
+    }
+    persist();
+    renderThemeButtons();
+    bestHud.textContent = `BEST ${saveData.best}`;
+
+    const moveStr = currentRunLog.map(m => `${Math.round(m.t * 10)}:${m.lane}`).join(',');
+    const payload = `${currentSeed}|${finalScore}|${moveStr}`;
+    const code = 'ND-' + btoa(payload);
+
+    document.getElementById('shareCodeOut').value = code;
+    document.getElementById('finalScoreVal').textContent = finalScore;
+    document.getElementById('finalBestVal').textContent = saveData.best;
+
+    const banner = document.getElementById('recordBanner');
+    if (isNewBest) {
+      banner.textContent = '★ NEW PERSONAL RECORD ★';
+      banner.classList.remove('hidden');
+    } else if (mode === 'CHALLENGE') {
+      banner.textContent = finalScore > targetChallengeScore ? '🔥 RIVAL DEFEATED!' : `RIVAL TARGET: ${targetChallengeScore}`;
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
+
+    setTimeout(() => {
+      gameOverOverlay.classList.remove('hidden');
+    }, 520);
+  }
+
+  // --- RHYTHM SPAWNER ---
+  function spawnBeatEntities(beatStep) {
+    const zSpawn = 1.0;
+    const r = rng();
+    if (beatStep % 4 === 0) {
+      const safeLane = Math.floor(rng() * 3);
+      const doubleBlock = (runTime > 8 && rng() < 0.45);
+      for (let l = 0; l < 3; l++) {
+        if (l === safeLane) continue;
+        if (doubleBlock || l === (safeLane + 1 + Math.floor(rng() * 2)) % 3) {
+          entities.push({ z: zSpawn, lane: l, type: 'obs', passed: false });
+        }
+      }
+      if (rng() < 0.78) {
+        const pRoll = rng();
+        let itemType = 'orb';
+        if (pRoll < 0.06) itemType = 'shield';
+        else if (pRoll < 0.12) itemType = 'slow';
+        else if (pRoll < 0.18) itemType = 'magnet';
+        entities.push({ z: zSpawn, lane: safeLane, type: itemType, passed: false });
+      }
+    } else if (r < 0.55) {
+      const lane = Math.floor(rng() * 3);
+      entities.push({ z: zSpawn, lane, type: 'orb', passed: false });
+    }
+  }
+
+  // --- INPUT HANDLING ---
+  function switchLane(dir) {
+    if (state !== 'PLAYING') return;
+    if (dir === 'CYCLE') {
+      playerLane = (playerLane + 1) % 3;
+    } else if (dir === 'LEFT') {
+      playerLane = Math.max(0, playerLane - 1);
+    } else if (dir === 'RIGHT') {
+      playerLane = Math.min(2, playerLane + 1);
+    }
+    currentRunLog.push({ t: Number(runTime.toFixed(2)), lane: playerLane });
+    playTone(320 + playerLane * 90, 'triangle', 0.08, 0.1, 480 + playerLane * 90);
+    spawnExplosion(laneToScreenX(playerVisualX, 0.08), projectY(0.08), currentTheme.ball, 8);
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault();
+      if (state === 'PLAYING') switchLane('CYCLE');
+    } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      switchLane('LEFT');
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      switchLane('RIGHT');
+    }
+  });
+
+  canvas.addEventListener('pointerdown', e => {
+    if (state !== 'PLAYING') return;
+    if (e.clientX < width * 0.42) switchLane('LEFT');
+    else if (e.clientX > width * 0.58) switchLane('RIGHT');
+    else switchLane('CYCLE');
+  });
+
+  // --- 3D PERSPECTIVE PROJECTION ---
+  function projectY(z) {
+    const horizonY = height * 0.34;
+    const bottomY = height * 0.96;
+    const persp = Math.pow(1 - z, 2.1);
+    return horizonY + (bottomY - horizonY) * persp;
+  }
+
+  function projectScale(z) {
+    return Math.max(0.04, Math.pow(1 - z, 1.85));
+  }
+
+  function laneToScreenX(laneIndex, z) {
+    const centerX = width * 0.5;
+    const scale = projectScale(z);
+    const roadHalfWidth = Math.min(width * 0.44, 340) * scale;
+    const laneOffset = (laneIndex - 1) * (roadHalfWidth * 0.66);
+    return centerX + laneOffset;
+  }
+
+  // --- PARTICLES ---
+  function spawnExplosion(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const spd = 2 + Math.random() * 6.5;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * spd,
+        vy: Math.sin(angle) * spd - 1.5,
+        life: 1.0,
+        color,
+        size: 2 + Math.random() * 4.5
+      });
+    }
+  }
+
+  // --- MAIN LOOP ---
+  let lastTime = performance.now();
+  let gridScroll = 0;
+
+  function update(dt) {
+    if (shake > 0) shake = Math.max(0, shake - dt * 50);
+    if (pulseBeat > 0) pulseBeat = Math.max(0, pulseBeat - dt * 4);
+    if (hitFlash > 0) hitFlash = Math.max(0, hitFlash - dt * 2.5);
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= dt * 2.2;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    if (state !== 'PLAYING') return;
+
+    runTime += dt;
+    baseSpeed = 15 + Math.min(22, runTime * 0.32);
+
+    if (powerups.slow > 0) powerups.slow = Math.max(0, powerups.slow - dt);
+    if (powerups.magnet > 0) powerups.magnet = Math.max(0, powerups.magnet - dt);
+
+    const speedMult = powerups.slow > 0 ? 0.55 : 1.0;
+    speed = baseSpeed * speedMult;
+    const dz = (speed * 0.045) * dt;
+    gridScroll = (gridScroll + dz * 8) % 1;
+
+    score += dt * 18 * combo;
+    playerVisualX += (playerLane - playerVisualX) * Math.min(1, dt * 19);
+
+    // Update speed meter bars
+    const activeBars = Math.min(8, Math.max(1, Math.ceil(((speed - 14) / 23) * 8)));
+    speedBars.forEach((bar, idx) => {
+      bar.classList.toggle('active', idx < activeBars);
+      bar.classList.toggle('hot', idx < activeBars && activeBars >= 6);
+    });
+
+    if (Math.random() < 0.75) {
+      particles.push({
+        x: laneToScreenX(playerVisualX, 0.08) + (Math.random() - 0.5) * 10,
+        y: projectY(0.08) + 6,
+        vx: (Math.random() - 0.5) * 1.2,
+        vy: 1.5 + Math.random() * 2,
+        life: 0.6,
+        color: currentTheme.ball,
+        size: 3.5
+      });
+    }
+
+    const playerZ = 0.08;
+    for (let i = entities.length - 1; i >= 0; i--) {
+      const ent = entities[i];
+      ent.z -= dz;
+
+      if (powerups.magnet > 0 && ent.type === 'orb' && ent.z < 0.48 && ent.z > 0.02) {
+        ent.lane += (playerVisualX - ent.lane) * dt * 8.5;
+      }
+
+      if (!ent.passed && Math.abs(ent.z - playerZ) < 0.038) {
+        const laneDist = Math.abs(ent.lane - playerVisualX);
+        if (laneDist < 0.42) {
+          ent.passed = true;
+          const px = laneToScreenX(playerVisualX, playerZ);
+          const py = projectY(playerZ);
+
+          if (ent.type === 'obs') {
+            if (powerups.shield) {
+              powerups.shield = false;
+              shake = 14;
+              hitFlash = 0.45;
+              playTone(200, 'sawtooth', 0.25, 0.2, 600);
+              spawnExplosion(px, py, '#00f3ff', 28);
+              spawnFloatingText(px, py - 35, 'SHIELD BREAK!', '#00f3ff');
+              entities.splice(i, 1);
+              continue;
+            } else {
+              endGame();
+              return;
+            }
+          } else if (ent.type === 'orb') {
+            const pts = 25 * combo;
+            score += pts;
+            playTone(587.33 + combo * 40, 'sine', 0.12, 0.14, 880 + combo * 40);
+            spawnExplosion(px, py, currentTheme.orb, 12);
+            spawnFloatingText(px, py - 28, `+${pts}`, currentTheme.orb);
+            entities.splice(i, 1);
+            continue;
+          } else if (ent.type === 'shield') {
+            powerups.shield = true;
+            playTone(440, 'triangle', 0.25, 0.15, 880);
+            spawnExplosion(px, py, '#00f3ff', 18);
+            spawnFloatingText(px, py - 32, 'SHIELD', '#00f3ff');
+            entities.splice(i, 1);
+            continue;
+          } else if (ent.type === 'slow') {
+            powerups.slow = 5.0;
+            playTone(660, 'sine', 0.3, 0.15, 220);
+            spawnExplosion(px, py, '#d580ff', 18);
+            spawnFloatingText(px, py - 32, 'TIME WARP', '#d580ff');
+            entities.splice(i, 1);
+            continue;
+          } else if (ent.type === 'magnet') {
+            powerups.magnet = 6.0;
+            playTone(330, 'square', 0.25, 0.1, 660);
+            spawnExplosion(px, py, '#ffe600', 18);
+            spawnFloatingText(px, py - 32, 'MAGNET', '#ffe600');
+            entities.splice(i, 1);
+            continue;
+          }
+        }
+      }
+
+      if (!ent.passed && ent.z < playerZ - 0.04) {
+        ent.passed = true;
+        if (ent.type === 'obs') {
+          const laneDist = Math.abs(ent.lane - playerVisualX);
+          if (laneDist < 1.15) {
+            combo = Math.min(10, combo + 1);
+            const bonus = 15 * combo;
+            score += bonus;
+            playTone(740, 'sine', 0.07, 0.08, 980);
+            const px = laneToScreenX(playerVisualX, playerZ);
+            const py = projectY(playerZ);
+            spawnFloatingText(px, py - 42, `NEAR MISS x${combo}`, '#00f3ff');
+          }
+        }
+      }
+
+      if (ent.z < -0.1) entities.splice(i, 1);
+    }
+
+    scoreEl.textContent = String(Math.floor(score)).padStart(4, '0');
+    comboPill.textContent = `x${combo}`;
+    bestHud.textContent = `BEST ${Math.max(saveData.best, Math.floor(score))}`;
+
+    let badges = '';
+    if (powerups.shield) badges += `<span class="badge" style="color:#00f3ff">SHIELD</span>`;
+    if (powerups.slow > 0) badges += `<span class="badge" style="color:#d580ff">SLOW ${powerups.slow.toFixed(1)}s</span>`;
+    if (powerups.magnet > 0) badges += `<span class="badge" style="color:#ffe600">MAGNET ${powerups.magnet.toFixed(1)}s</span>`;
+    powerupHud.innerHTML = badges;
+  }
+
+  // --- RENDERING ---
+  function draw() {
+    ctx.save();
+    if (shake > 0) {
+      ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    }
+
+    ctx.fillStyle = currentTheme.bg;
+    ctx.fillRect(0, 0, width, height);
+
+    const horizonY = height * 0.34;
+
+    // Horizon Glow
+    const horizonGlow = ctx.createRadialGradient(width * 0.5, horizonY, 10, width * 0.5, horizonY, width * 0.55);
+    horizonGlow.addColorStop(0, currentTheme.grid + '44');
+    horizonGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = horizonGlow;
+    ctx.fillRect(0, 0, width, height);
+
+    // Synthwave Sun
+    const sunRadius = Math.min(width, height) * (0.16 + pulseBeat * 0.015);
+    const sunGrad = ctx.createLinearGradient(0, horizonY - sunRadius, 0, horizonY + 10);
+    sunGrad.addColorStop(0, currentTheme.orb);
+    sunGrad.addColorStop(1, currentTheme.grid);
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(width * 0.5, horizonY, sunRadius, Math.PI, 0);
+    ctx.fill();
+
+    // Road Trapezoid
+    const topLeft = laneToScreenX(-0.5, 1.0);
+    const topRight = laneToScreenX(2.5, 1.0);
+    const botLeft = laneToScreenX(-0.5, 0.0);
+    const botRight = laneToScreenX(2.5, 0.0);
+
+    ctx.fillStyle = currentTheme.road;
+    ctx.beginPath();
+    ctx.moveTo(topLeft, horizonY);
+    ctx.lineTo(topRight, horizonY);
+    ctx.lineTo(botRight, height);
+    ctx.lineTo(botLeft, height);
+    ctx.closePath();
+    ctx.fill();
+
+    // Horizontal Grid Lines
+    ctx.strokeStyle = currentTheme.grid;
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 14; i++) {
+      const z = ((i + (1 - gridScroll)) / 14);
+      const y = projectY(z);
+      const lx = laneToScreenX(-0.5, z);
+      const rx = laneToScreenX(2.5, z);
+      ctx.globalAlpha = (1 - z) * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(lx, y);
+      ctx.lineTo(rx, y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Lane Dividers & Neon Rails
+    for (let l = -0.5; l <= 2.5; l += 1) {
+      const isRail = (l === -0.5 || l === 2.5);
+      ctx.strokeStyle = isRail ? currentTheme.ball : currentTheme.grid;
+      ctx.lineWidth = isRail ? 3.5 : 1.5;
+      if (isRail) {
+        ctx.shadowColor = currentTheme.ball;
+        ctx.shadowBlur = 12;
+      }
+      ctx.beginPath();
+      ctx.moveTo(laneToScreenX(l, 1.0), horizonY);
+      ctx.lineTo(laneToScreenX(l, 0.0), height);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    // Sort Entities
+    const sorted = [...entities].sort((a, b) => b.z - a.z);
+    for (const ent of sorted) {
+      if (ent.z < 0 || ent.z > 1) continue;
+      const x = laneToScreenX(ent.lane, ent.z);
+      const y = projectY(ent.z);
+      const s = projectScale(ent.z);
+
+      if (ent.type === 'obs') {
+        const w = 60 * s;
+        const h = 46 * s;
+        ctx.fillStyle = currentTheme.obs;
+        ctx.shadowColor = currentTheme.obs;
+        ctx.shadowBlur = 16 * s;
+        ctx.fillRect(x - w / 2, y - h, w, h);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2 * s;
+        ctx.strokeRect(x - w / 2, y - h, w, h);
+        ctx.shadowBlur = 0;
+      } else {
+        const r = 16 * s;
+        let col = currentTheme.orb;
+        if (ent.type === 'shield') col = '#00f3ff';
+        if (ent.type === 'slow') col = '#d580ff';
+        if (ent.type === 'magnet') col = '#ffffff';
+
+        ctx.fillStyle = col;
+        ctx.shadowColor = col;
+        ctx.shadowBlur = 18 * s;
+        ctx.beginPath();
+        ctx.arc(x, y - r, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    // Ghost Ball
+    if (state === 'PLAYING' && activeGhostLog.length > 0) {
+      let ghostLane = activeGhostLog[0].lane;
+      for (let i = 0; i < activeGhostLog.length; i++) {
+        if (activeGhostLog[i].t <= runTime) ghostLane = activeGhostLog[i].lane;
+        else break;
+      }
+      const gx = laneToScreenX(ghostLane, 0.09);
+      const gy = projectY(0.09);
+      const gr = 20 * projectScale(0.09);
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(gx, gy - gr, gr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Player Ball
+    if (state !== 'GAMEOVER') {
+      const pz = 0.08;
+      const px = laneToScreenX(playerVisualX, pz);
+      const py = projectY(pz);
+      const pr = 22 * projectScale(pz);
+
+      ctx.fillStyle = currentTheme.ball;
+      ctx.shadowColor = currentTheme.ball;
+      ctx.shadowBlur = 24;
+      ctx.beginPath();
+      ctx.arc(px, py - pr, pr, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner core highlight
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(px, py - pr, pr * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      if (powerups.shield) {
+        ctx.strokeStyle = '#00f3ff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(px, py - pr, pr * 1.48, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // Particles
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+
+    // Impact Flash
+    if (hitFlash > 0) {
+      ctx.fillStyle = `rgba(255, 42, 85, ${hitFlash * 0.45})`;
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    ctx.restore();
+  }
+
+  function loop(now) {
+    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    lastTime = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // --- BUTTON BINDINGS ---
+  document.getElementById('playEndlessBtn').onclick = () => startGame('ENDLESS');
+  document.getElementById('playDailyBtn').onclick = () => startGame('DAILY');
+  document.getElementById('retryBtn').onclick = () => startGame(mode, currentSeed, activeGhostLog, targetChallengeScore);
+  document.getElementById('menuBtn').onclick = () => {
+    state = 'MENU';
+    gameOverOverlay.classList.add('hidden');
+    menuOverlay.classList.remove('hidden');
+  };
+
+  document.getElementById('copyCodeBtn').onclick = () => {
+    const input = document.getElementById('shareCodeOut');
+    input.select();
+    navigator.clipboard.writeText(input.value);
+    showToast('Challenge code copied!');
+  };
+
+  document.getElementById('loadCodeBtn').onclick = () => {
+    const raw = document.getElementById('challengeInput').value.trim();
+    if (!raw.startsWith('ND-')) return showToast('Invalid challenge code!');
+    try {
+      const decoded = atob(raw.slice(3));
+      const [seedStr, scoreStr, movesStr] = decoded.split('|');
+      const seed = parseInt(seedStr, 10);
+      const target = parseInt(scoreStr, 10);
+      const ghost = movesStr ? movesStr.split(',').map(pair => {
+        const [t, l] = pair.split(':');
+        return { t: parseInt(t, 10) / 10, lane: parseInt(l, 10) };
+      }) : [];
+      startGame('CHALLENGE', seed, ghost, target);
+    } catch (err) {
+      showToast('Could not read challenge code.');
+    }
+  };
+})();
+</script>
+</body>
+</html>
