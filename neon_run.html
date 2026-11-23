@@ -23,9 +23,9 @@
       width: 100%; height: 100%; overflow: hidden;
       background: var(--bg); color: var(--text);
       font-family: 'Rajdhani', system-ui, sans-serif;
-      touch-action: manipulation;
+      touch-action: none;
     }
-    canvas { display: block; width: 100%; height: 100%; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 
     /* CRT Scanline & Vignette Polish */
     .crt-overlay {
@@ -347,7 +347,7 @@
       <div class="kicker">SYNTHWAVE ARCADE EDITION</div>
       <h1>NEON DRIFT</h1>
       <p class="subtitle">
-        Tap sides or press <span class="key-hint">SPACE</span> <span class="key-hint">A</span> <span class="key-hint">D</span> to shift lanes.
+        Tap sides, swipe, or press <span class="key-hint">SPACE</span> <span class="key-hint">A</span> <span class="key-hint">D</span> to shift lanes.
         Graze barriers for <b style="color:var(--orb)">NEAR-MISS</b> combos & outrun your ghost.
       </p>
 
@@ -713,7 +713,7 @@
     }
   }
 
-  // --- INPUT HANDLING ---
+  // --- INPUT HANDLING (Keyboard, Pointer & Mobile Touch + Swipe) ---
   function switchLane(dir) {
     if (state !== 'PLAYING') return;
     if (dir === 'CYCLE') {
@@ -739,7 +739,49 @@
     }
   });
 
+  let touchStartX = null;
+  let touchStartY = null;
+  let swipeHandled = false;
+
+  canvas.addEventListener('touchstart', e => {
+    if (state !== 'PLAYING') return;
+    e.preventDefault();
+    const touch = e.changedTouches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    swipeHandled = false;
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', e => {
+    if (state !== 'PLAYING' || touchStartX === null || swipeHandled) return;
+    e.preventDefault();
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - touchStartX;
+    const dy = touch.clientY - touchStartY;
+    const swipeThreshold = 28;
+    if (Math.abs(dx) > swipeThreshold && Math.abs(dx) > Math.abs(dy)) {
+      switchLane(dx < 0 ? 'LEFT' : 'RIGHT');
+      swipeHandled = true;
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', e => {
+    if (state !== 'PLAYING' || touchStartX === null) return;
+    e.preventDefault();
+    const touch = e.changedTouches[0];
+    if (!swipeHandled) {
+      const x = touch.clientX;
+      if (x < width * 0.42) switchLane('LEFT');
+      else if (x > width * 0.58) switchLane('RIGHT');
+      else switchLane('CYCLE');
+    }
+    touchStartX = null;
+    touchStartY = null;
+    swipeHandled = false;
+  }, { passive: false });
+
   canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch') return;
     if (state !== 'PLAYING') return;
     if (e.clientX < width * 0.42) switchLane('LEFT');
     else if (e.clientX > width * 0.58) switchLane('RIGHT');
