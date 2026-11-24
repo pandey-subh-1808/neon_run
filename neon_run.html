@@ -415,15 +415,25 @@
     { id: 'gameboy', name: 'Retro GB', unlock: 3000, bg: '#0f380f', grid: '#8bac0f', road: '#275227', ball: '#9bbc0f', obs: '#0f380f', orb: '#9bbc0f' }
   ];
 
-  // --- STORAGE & STATE ---
-  let saveData = JSON.parse(localStorage.getItem('neonDriftSave') || '{}');
-  saveData.best = saveData.best || 0;
-  saveData.theme = saveData.theme || 'neon';
-  saveData.bestGhost = saveData.bestGhost || [];
-  saveData.dailyBest = saveData.dailyBest || {};
+  // --- SAFE STORAGE ---
+  const defaultSave = { best: 0, theme: 'neon', bestGhost: [], dailyBest: {} };
+  let saveData = { ...defaultSave };
+  try {
+    const parsed = JSON.parse(localStorage.getItem('neonDriftSave') || '{}');
+    if (parsed && typeof parsed === 'object') {
+      saveData.best = Number.isFinite(parsed.best) ? Math.max(0, parsed.best) : 0;
+      saveData.theme = typeof parsed.theme === 'string' ? parsed.theme : 'neon';
+      saveData.bestGhost = Array.isArray(parsed.bestGhost) ? parsed.bestGhost : [];
+      saveData.dailyBest = (parsed.dailyBest && typeof parsed.dailyBest === 'object') ? parsed.dailyBest : {};
+    }
+  } catch (_) {
+    saveData = { ...defaultSave };
+  }
 
   function persist() {
-    localStorage.setItem('neonDriftSave', JSON.stringify(saveData));
+    try {
+      localStorage.setItem('neonDriftSave', JSON.stringify(saveData));
+    } catch (_) {}
   }
 
   let currentTheme = THEMES.find(t => t.id === saveData.theme) || THEMES[0];
@@ -456,67 +466,84 @@
   let step = 0;
   let muted = false;
 
+  function initAudio() {
+    if (!audioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) audioCtx = new AudioContextClass();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+  }
+
   document.getElementById('muteBtn').onclick = () => {
+    initAudio();
     muted = !muted;
     document.getElementById('muteBtn').textContent = muted ? 'SFX: OFF' : 'SFX: ON';
   };
 
-  function initAudio() {
-    if (!audioCtx) {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-  }
-
   function playTone(freq, type, duration, vol = 0.12, slide = 0) {
-    if (!audioCtx || muted) return;
+    if (!audioCtx || muted || document.hidden) return;
+    const now = audioCtx.currentTime;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = type;
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    if (slide) osc.frequency.exponentialRampToValueAtTime(slide, audioCtx.currentTime + duration);
-    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.frequency.setValueAtTime(freq, now);
+    if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slide), now + duration);
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
     osc.connect(gain);
     gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + duration);
+    osc.start(now);
+    osc.stop(now + duration);
   }
 
   const BASS_NOTES = [55, 55, 65.41, 73.42, 55, 55, 82.41, 73.42];
+  function stopMusic() {
+    if (beatInterval !== null) {
+      clearInterval(beatInterval);
+      beatInterval = null;
+    }
+  }
+
+  function triggerBeatStep() {
+    if (state !== 'PLAYING' || document.hidden) return;
+    if (step % 2 === 0) {
+      playTone(130, 'sine', 0.14, 0.22, 32);
+      pulseBeat = 1.0;
+      spawnBeatEntities(step);
+    }
+    const note = BASS_NOTES[step % BASS_NOTES.length];
+    playTone(note, 'sawtooth', 0.16, 0.065);
+    if (step % 2 === 1) {
+      playTone(6000, 'square', 0.03, 0.018);
+    }
+    step++;
+  }
+
   function startMusic() {
     stopMusic();
     step = 0;
-    beatInterval = setInterval(() => {
-      if (state !== 'PLAYING') return;
-      if (step % 2 === 0) {
-        playTone(130, 'sine', 0.14, 0.22, 32);
-        pulseBeat = 1.0;
-        spawnBeatEntities(step);
-      }
-      const note = BASS_NOTES[step % BASS_NOTES.length];
-      playTone(note, 'sawtooth', 0.16, 0.065);
-      if (step % 2 === 1) {
-        playTone(6000, 'square', 0.03, 0.018);
-      }
-      step++;
-    }, 240);
-  }
-
-  function stopMusic() {
-    if (beatInterval) clearInterval(beatInterval);
+    beatInterval = setInterval(triggerBeatStep, 240);
   }
 
   // --- GAME VARIABLES ---
-  let state = 'MENU';
+  let state = 'MENU'; // MENU, PLAYING, GAMEOVER
   let mode = 'ENDLESS';
   let currentSeed = Date.now();
   let rng = Math.random;
 
-  let width, height;
+  let width = window.innerWidth;
+  let height = window.innerHeight;
+  let dpr = Math.min(window.devicePixelRatio || 1, 2);
+
   function resize() {
-    width = canvas.width = window.innerWidth;
-    height = canvas.height = window.innerHeight;
+    width = window.innerWidth;
+    height = window.innerHeight;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.floor(width * dpr));
+    canvas.height = Math.max(1, Math.floor(height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   window.addEventListener('resize', resize);
   resize();
@@ -524,20 +551,23 @@
   let playerLane = 1;
   let playerVisualX = 1;
   let fingerDragging = false;
-  let lastLoggedLane = 1;
+  let lastLoggedX = 1;
   let score = 0;
   let combo = 1;
   let runTime = 0;
+  let trackTime = 0;
   let baseSpeed = 15;
   let speed = 15;
   let shake = 0;
   let pulseBeat = 0;
   let hitFlash = 0;
+  let invulnTimer = 0;
+  let gameOverTimeout = null;
 
   let powerups = { slow: 0, shield: false, magnet: 0 };
   let entities = [];
   let particles = [];
-  let currentRunLog = [];
+  let currentRunLog = []; // [{ t, tt, x }]
   let activeGhostLog = [];
   let targetChallengeScore = 0;
 
@@ -559,7 +589,7 @@
     const t = document.getElementById('toast');
     t.textContent = msg;
     t.style.opacity = 1;
-    setTimeout(() => t.style.opacity = 0, 2100);
+    setTimeout(() => { t.style.opacity = 0; }, 2100);
   }
 
   function spawnFloatingText(x, y, text, color) {
@@ -581,6 +611,7 @@
       btn.className = `theme-btn ${unlocked ? 'unlocked' : ''} ${currentTheme.id === t.id ? 'selected' : ''}`;
       btn.textContent = unlocked ? t.name : `${t.unlock} PTS`;
       btn.onclick = () => {
+        initAudio();
         if (!unlocked) return showToast(`Unlock at ${t.unlock} points`);
         currentTheme = t;
         applyThemeCSS(t);
@@ -593,9 +624,36 @@
   }
   renderThemeButtons();
 
+  function logPositionSample(force = false) {
+    const roundedX = Number(playerVisualX.toFixed(2));
+    if (force || Math.abs(roundedX - lastLoggedX) >= 0.08) {
+      lastLoggedX = roundedX;
+      currentRunLog.push({
+        t: Number(runTime.toFixed(2)),
+        tt: Number(trackTime.toFixed(2)),
+        x: roundedX
+      });
+    }
+  }
+
+  function computeChecksum(str) {
+    let hash = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      hash ^= str.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+  }
+
   // --- GAME LIFECYCLE ---
   function startGame(selectedMode, customSeed = null, ghostData = null, challengeTarget = 0) {
+    if (gameOverTimeout !== null) {
+      clearTimeout(gameOverTimeout);
+      gameOverTimeout = null;
+    }
+    stopMusic();
     initAudio();
+
     mode = selectedMode;
     if (mode === 'DAILY') {
       currentSeed = getTodaySeed();
@@ -612,18 +670,22 @@
     playerLane = 1;
     playerVisualX = 1;
     fingerDragging = false;
-    lastLoggedLane = 1;
+    activeTouchId = null;
+    lastLoggedX = 1;
     score = 0;
     combo = 1;
     runTime = 0;
+    trackTime = 0;
     baseSpeed = 15;
     speed = 15;
     shake = 0;
     hitFlash = 0;
+    invulnTimer = 0;
     entities = [];
     particles = [];
+    floatLayer.innerHTML = '';
     powerups = { slow: 0, shield: false, magnet: 0 };
-    currentRunLog = [{ t: 0, lane: 1 }];
+    currentRunLog = [{ t: 0, tt: 0, x: 1 }];
     targetChallengeScore = challengeTarget;
 
     if (ghostData && ghostData.length) {
@@ -638,15 +700,20 @@
     }
 
     state = 'PLAYING';
+    lastTime = performance.now();
     menuOverlay.classList.add('hidden');
     gameOverOverlay.classList.add('hidden');
     startMusic();
   }
 
   function endGame() {
+    if (state !== 'PLAYING') return;
     state = 'GAMEOVER';
     fingerDragging = false;
+    activeTouchId = null;
     stopMusic();
+    logPositionSample(true);
+
     shake = 26;
     hitFlash = 0.85;
     playTone(110, 'sawtooth', 0.45, 0.25, 28);
@@ -667,9 +734,12 @@
     renderThemeButtons();
     bestHud.textContent = `BEST ${saveData.best}`;
 
-    const moveStr = currentRunLog.map(m => `${Math.round(m.t * 10)}:${m.lane}`).join(',');
-    const payload = `${currentSeed}|${finalScore}|${moveStr}`;
-    const code = 'ND-' + btoa(payload);
+    const moveStr = currentRunLog
+      .map(m => `${Math.round((m.tt ?? m.t) * 10)}:${Number(m.x ?? m.lane).toFixed(2)}`)
+      .join(',');
+    const body = `${currentSeed}|${finalScore}|${moveStr}`;
+    const sig = computeChecksum(body);
+    const code = 'ND-' + btoa(`${body}#${sig}`);
 
     document.getElementById('shareCodeOut').value = code;
     document.getElementById('finalScoreVal').textContent = finalScore;
@@ -686,8 +756,11 @@
       banner.classList.add('hidden');
     }
 
-    setTimeout(() => {
-      gameOverOverlay.classList.remove('hidden');
+    gameOverTimeout = setTimeout(() => {
+      gameOverTimeout = null;
+      if (state === 'GAMEOVER') {
+        gameOverOverlay.classList.remove('hidden');
+      }
     }, 520);
   }
 
@@ -697,11 +770,11 @@
     const r = rng();
     if (beatStep % 4 === 0) {
       const safeLane = Math.floor(rng() * 3);
-      const doubleBlock = (runTime > 8 && rng() < 0.45);
+      const doubleBlock = (trackTime > 8 && rng() < 0.45);
       for (let l = 0; l < 3; l++) {
         if (l === safeLane) continue;
         if (doubleBlock || l === (safeLane + 1 + Math.floor(rng() * 2)) % 3) {
-          entities.push({ z: zSpawn, lane: l, type: 'obs', passed: false });
+          entities.push({ z: zSpawn, prevZ: zSpawn, lane: l, type: 'obs', passed: false });
         }
       }
       if (rng() < 0.78) {
@@ -710,11 +783,11 @@
         if (pRoll < 0.06) itemType = 'shield';
         else if (pRoll < 0.12) itemType = 'slow';
         else if (pRoll < 0.18) itemType = 'magnet';
-        entities.push({ z: zSpawn, lane: safeLane, type: itemType, passed: false });
+        entities.push({ z: zSpawn, prevZ: zSpawn, lane: safeLane, type: itemType, passed: false });
       }
     } else if (r < 0.55) {
       const lane = Math.floor(rng() * 3);
-      entities.push({ z: zSpawn, lane, type: 'orb', passed: false });
+      entities.push({ z: zSpawn, prevZ: zSpawn, lane, type: 'orb', passed: false });
     }
   }
 
@@ -728,8 +801,6 @@
     } else if (dir === 'RIGHT') {
       playerLane = Math.min(2, playerLane + 1);
     }
-    lastLoggedLane = playerLane;
-    currentRunLog.push({ t: Number(runTime.toFixed(2)), lane: playerLane });
     playTone(320 + playerLane * 90, 'triangle', 0.08, 0.1, 480 + playerLane * 90);
     spawnExplosion(laneToScreenX(playerVisualX, 0.08), projectY(0.08), currentTheme.ball, 8);
   }
@@ -745,12 +816,10 @@
     }
   });
 
-  // Smooth continuous finger-tracking along the road as finger moves
   function screenXToContinuousLane(x) {
     const leftX = laneToScreenX(0, 0.08);
     const rightX = laneToScreenX(2, 0.08);
     const span = Math.max(80, rightX - leftX);
-    // Allow sliding slightly outside lane 0 and lane 2 edges smoothly
     const raw = ((x - leftX) / span) * 2;
     return Math.max(-0.35, Math.min(2.35, raw));
   }
@@ -767,11 +836,8 @@
     const targetX = screenXToContinuousLane(touch.clientX);
     playerVisualX = targetX;
     playerLane = Math.max(0, Math.min(2, Math.round(targetX)));
-    if (playerLane !== lastLoggedLane) {
-      lastLoggedLane = playerLane;
-      currentRunLog.push({ t: Number(runTime.toFixed(2)), lane: playerLane });
-      playTone(320 + playerLane * 90, 'triangle', 0.07, 0.08, 480 + playerLane * 90);
-    }
+    logPositionSample(true);
+    playTone(320 + playerLane * 90, 'triangle', 0.07, 0.08, 480 + playerLane * 90);
   }, { passive: false });
 
   canvas.addEventListener('touchmove', e => {
@@ -785,12 +851,9 @@
         const nearestLane = Math.max(0, Math.min(2, Math.round(targetX)));
         if (nearestLane !== playerLane) {
           playerLane = nearestLane;
-          if (playerLane !== lastLoggedLane) {
-            lastLoggedLane = playerLane;
-            currentRunLog.push({ t: Number(runTime.toFixed(2)), lane: playerLane });
-            playTone(320 + playerLane * 90, 'triangle', 0.07, 0.08, 480 + playerLane * 90);
-          }
+          playTone(320 + playerLane * 90, 'triangle', 0.07, 0.08, 480 + playerLane * 90);
         }
+        logPositionSample(false);
         break;
       }
     }
@@ -803,6 +866,7 @@
         activeTouchId = null;
         fingerDragging = false;
         playerLane = Math.max(0, Math.min(2, Math.round(playerVisualX)));
+        logPositionSample(true);
         break;
       }
     }
@@ -817,6 +881,17 @@
     if (e.clientX < width * 0.42) switchLane('LEFT');
     else if (e.clientX > width * 0.58) switchLane('RIGHT');
     else switchLane('CYCLE');
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopMusic();
+      fingerDragging = false;
+      activeTouchId = null;
+    } else {
+      lastTime = performance.now();
+      if (state === 'PLAYING') startMusic();
+    }
   });
 
   // --- 3D PERSPECTIVE PROJECTION ---
@@ -855,14 +930,16 @@
     }
   }
 
-  // --- MAIN LOOP ---
+  // --- MAIN LOOP (Single Bounded rAF) ---
   let lastTime = performance.now();
   let gridScroll = 0;
+  let rafId = null;
 
   function update(dt) {
     if (shake > 0) shake = Math.max(0, shake - dt * 50);
     if (pulseBeat > 0) pulseBeat = Math.max(0, pulseBeat - dt * 4);
     if (hitFlash > 0) hitFlash = Math.max(0, hitFlash - dt * 2.5);
+    if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
 
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
@@ -875,22 +952,28 @@
     if (state !== 'PLAYING') return;
 
     runTime += dt;
-    baseSpeed = 15 + Math.min(22, runTime * 0.32);
+    baseSpeed = 15 + Math.min(22, trackTime * 0.32);
 
     if (powerups.slow > 0) powerups.slow = Math.max(0, powerups.slow - dt);
     if (powerups.magnet > 0) powerups.magnet = Math.max(0, powerups.magnet - dt);
 
     const speedMult = powerups.slow > 0 ? 0.55 : 1.0;
     speed = baseSpeed * speedMult;
+    const trackDt = dt * speedMult;
+    trackTime += trackDt;
+
     const dz = (speed * 0.045) * dt;
     gridScroll = (gridScroll + dz * 8) % 1;
 
     score += dt * 18 * combo;
     if (!fingerDragging) {
+      const prevX = playerVisualX;
       playerVisualX += (playerLane - playerVisualX) * Math.min(1, dt * 19);
+      if (Math.abs(playerVisualX - prevX) > 0.001) {
+        logPositionSample(false);
+      }
     }
 
-    // Update speed meter bars
     const activeBars = Math.min(8, Math.max(1, Math.ceil(((speed - 14) / 23) * 8)));
     speedBars.forEach((bar, idx) => {
       bar.classList.toggle('active', idx < activeBars);
@@ -910,15 +993,24 @@
     }
 
     const playerZ = 0.08;
+    const hitMinZ = playerZ - 0.042;
+    const hitMaxZ = playerZ + 0.042;
+
     for (let i = entities.length - 1; i >= 0; i--) {
       const ent = entities[i];
+      ent.prevZ = ent.z;
       ent.z -= dz;
 
       if (powerups.magnet > 0 && ent.type === 'orb' && ent.z < 0.48 && ent.z > 0.02) {
         ent.lane += (playerVisualX - ent.lane) * dt * 8.5;
       }
 
-      if (!ent.passed && Math.abs(ent.z - playerZ) < 0.038) {
+      // Swept collision check so fast dz never skips across playerZ
+      const crossedOrInZone =
+        (ent.z <= hitMaxZ && ent.z >= hitMinZ) ||
+        (ent.prevZ > playerZ && ent.z < playerZ);
+
+      if (!ent.passed && crossedOrInZone) {
         const laneDist = Math.abs(ent.lane - playerVisualX);
         if (laneDist < 0.42) {
           ent.passed = true;
@@ -926,8 +1018,12 @@
           const py = projectY(playerZ);
 
           if (ent.type === 'obs') {
+            if (invulnTimer > 0) {
+              continue;
+            }
             if (powerups.shield) {
               powerups.shield = false;
+              invulnTimer = 0.65;
               shake = 14;
               hitFlash = 0.45;
               playTone(200, 'sawtooth', 0.25, 0.2, 600);
@@ -972,11 +1068,11 @@
         }
       }
 
-      if (!ent.passed && ent.z < playerZ - 0.04) {
+      if (!ent.passed && ent.z < hitMinZ) {
         ent.passed = true;
         if (ent.type === 'obs') {
           const laneDist = Math.abs(ent.lane - playerVisualX);
-          if (laneDist < 1.15) {
+          if (laneDist >= 0.42 && laneDist < 1.2) {
             combo = Math.min(10, combo + 1);
             const bonus = 15 * combo;
             score += bonus;
@@ -988,7 +1084,7 @@
         }
       }
 
-      if (ent.z < -0.1) entities.splice(i, 1);
+      if (ent.z < -0.12) entities.splice(i, 1);
     }
 
     scoreEl.textContent = String(Math.floor(score)).padStart(4, '0');
@@ -1014,14 +1110,12 @@
 
     const horizonY = height * 0.34;
 
-    // Horizon Glow
     const horizonGlow = ctx.createRadialGradient(width * 0.5, horizonY, 10, width * 0.5, horizonY, width * 0.55);
     horizonGlow.addColorStop(0, currentTheme.grid + '44');
     horizonGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = horizonGlow;
     ctx.fillRect(0, 0, width, height);
 
-    // Synthwave Sun
     const sunRadius = Math.min(width, height) * (0.16 + pulseBeat * 0.015);
     const sunGrad = ctx.createLinearGradient(0, horizonY - sunRadius, 0, horizonY + 10);
     sunGrad.addColorStop(0, currentTheme.orb);
@@ -1031,7 +1125,6 @@
     ctx.arc(width * 0.5, horizonY, sunRadius, Math.PI, 0);
     ctx.fill();
 
-    // Road Trapezoid
     const topLeft = laneToScreenX(-0.5, 1.0);
     const topRight = laneToScreenX(2.5, 1.0);
     const botLeft = laneToScreenX(-0.5, 0.0);
@@ -1046,7 +1139,6 @@
     ctx.closePath();
     ctx.fill();
 
-    // Horizontal Grid Lines
     ctx.strokeStyle = currentTheme.grid;
     ctx.lineWidth = 1.5;
     for (let i = 0; i < 14; i++) {
@@ -1062,7 +1154,6 @@
     }
     ctx.globalAlpha = 1;
 
-    // Lane Dividers & Neon Rails
     for (let l = -0.5; l <= 2.5; l += 1) {
       const isRail = (l === -0.5 || l === 2.5);
       ctx.strokeStyle = isRail ? currentTheme.ball : currentTheme.grid;
@@ -1078,7 +1169,6 @@
       ctx.shadowBlur = 0;
     }
 
-    // Sort Entities
     const sorted = [...entities].sort((a, b) => b.z - a.z);
     for (const ent of sorted) {
       if (ent.z < 0 || ent.z > 1) continue;
@@ -1114,14 +1204,18 @@
       }
     }
 
-    // Ghost Ball
+    // Ghost Ball synced to trackTime & smooth x
     if (state === 'PLAYING' && activeGhostLog.length > 0) {
-      let ghostLane = activeGhostLog[0].lane;
+      let ghostX = Number(activeGhostLog[0].x ?? activeGhostLog[0].lane ?? 1);
       for (let i = 0; i < activeGhostLog.length; i++) {
-        if (activeGhostLog[i].t <= runTime) ghostLane = activeGhostLog[i].lane;
-        else break;
+        const sampleT = Number(activeGhostLog[i].tt ?? activeGhostLog[i].t ?? 0);
+        if (sampleT <= trackTime) {
+          ghostX = Number(activeGhostLog[i].x ?? activeGhostLog[i].lane ?? ghostX);
+        } else {
+          break;
+        }
       }
-      const gx = laneToScreenX(ghostLane, 0.09);
+      const gx = laneToScreenX(ghostX, 0.09);
       const gy = projectY(0.09);
       const gr = 20 * projectScale(0.09);
       ctx.save();
@@ -1135,35 +1229,36 @@
 
     // Player Ball
     if (state !== 'GAMEOVER') {
-      const pz = 0.08;
-      const px = laneToScreenX(playerVisualX, pz);
-      const py = projectY(pz);
-      const pr = 22 * projectScale(pz);
+      const blinkSkip = invulnTimer > 0 && Math.floor(invulnTimer * 20) % 2 === 0;
+      if (!blinkSkip) {
+        const pz = 0.08;
+        const px = laneToScreenX(playerVisualX, pz);
+        const py = projectY(pz);
+        const pr = 22 * projectScale(pz);
 
-      ctx.fillStyle = currentTheme.ball;
-      ctx.shadowColor = currentTheme.ball;
-      ctx.shadowBlur = 24;
-      ctx.beginPath();
-      ctx.arc(px, py - pr, pr, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Inner core highlight
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(px, py - pr, pr * 0.42, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      if (powerups.shield) {
-        ctx.strokeStyle = '#00f3ff';
-        ctx.lineWidth = 3;
+        ctx.fillStyle = currentTheme.ball;
+        ctx.shadowColor = currentTheme.ball;
+        ctx.shadowBlur = 24;
         ctx.beginPath();
-        ctx.arc(px, py - pr, pr * 1.48, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.arc(px, py - pr, pr, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(px, py - pr, pr * 0.42, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        if (powerups.shield) {
+          ctx.strokeStyle = '#00f3ff';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(px, py - pr, pr * 1.48, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
     }
 
-    // Particles
     for (const p of particles) {
       ctx.globalAlpha = Math.max(0, p.life);
       ctx.fillStyle = p.color;
@@ -1171,7 +1266,6 @@
     }
     ctx.globalAlpha = 1;
 
-    // Impact Flash
     if (hitFlash > 0) {
       ctx.fillStyle = `rgba(255, 42, 85, ${hitFlash * 0.45})`;
       ctx.fillRect(0, 0, width, height);
@@ -1181,19 +1275,29 @@
   }
 
   function loop(now) {
-    const dt = Math.min(0.05, (now - lastTime) / 1000);
-    lastTime = now;
-    update(dt);
-    draw();
-    requestAnimationFrame(loop);
+    rafId = null;
+    if (!document.hidden) {
+      const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
+      lastTime = now;
+      update(dt);
+      draw();
+    } else {
+      lastTime = now;
+    }
+    rafId = requestAnimationFrame(loop);
   }
-  requestAnimationFrame(loop);
+  rafId = requestAnimationFrame(loop);
 
   // --- BUTTON BINDINGS ---
   document.getElementById('playEndlessBtn').onclick = () => startGame('ENDLESS');
   document.getElementById('playDailyBtn').onclick = () => startGame('DAILY');
   document.getElementById('retryBtn').onclick = () => startGame(mode, currentSeed, activeGhostLog, targetChallengeScore);
   document.getElementById('menuBtn').onclick = () => {
+    if (gameOverTimeout !== null) {
+      clearTimeout(gameOverTimeout);
+      gameOverTimeout = null;
+    }
+    stopMusic();
     state = 'MENU';
     gameOverOverlay.classList.add('hidden');
     menuOverlay.classList.remove('hidden');
@@ -1202,7 +1306,9 @@
   document.getElementById('copyCodeBtn').onclick = () => {
     const input = document.getElementById('shareCodeOut');
     input.select();
-    navigator.clipboard.writeText(input.value);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(input.value).catch(() => {});
+    }
     showToast('Challenge code copied!');
   };
 
@@ -1210,16 +1316,23 @@
     const raw = document.getElementById('challengeInput').value.trim();
     if (!raw.startsWith('ND-')) return showToast('Invalid challenge code!');
     try {
-      const decoded = atob(raw.slice(3));
-      const [seedStr, scoreStr, movesStr] = decoded.split('|');
+      const fullDecoded = atob(raw.slice(3));
+      const [body, sig] = fullDecoded.split('#');
+      if (!body || !sig || computeChecksum(body) !== sig) {
+        return showToast('Challenge code modified or invalid!');
+      }
+      const [seedStr, scoreStr, movesStr] = body.split('|');
       const seed = parseInt(seedStr, 10);
       const target = parseInt(scoreStr, 10);
+      if (!Number.isFinite(seed) || !Number.isFinite(target) || target < 0) {
+        return showToast('Invalid challenge data!');
+      }
       const ghost = movesStr ? movesStr.split(',').map(pair => {
-        const [t, l] = pair.split(':');
-        return { t: parseInt(t, 10) / 10, lane: parseInt(l, 10) };
+        const [t, val] = pair.split(':');
+        return { tt: (parseInt(t, 10) || 0) / 10, x: parseFloat(val) || 1 };
       }) : [];
       startGame('CHALLENGE', seed, ghost, target);
-    } catch (err) {
+    } catch (_) {
       showToast('Could not read challenge code.');
     }
   };
