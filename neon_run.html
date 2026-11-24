@@ -510,7 +510,6 @@
     if (state !== 'PLAYING' || document.hidden) return;
     if (step % 2 === 0) {
       playTone(130, 'sine', 0.14, 0.22, 32);
-      pulseBeat = 1.0;
       spawnBeatEntities(step);
     }
     const note = BASS_NOTES[step % BASS_NOTES.length];
@@ -528,7 +527,7 @@
   }
 
   // --- GAME VARIABLES ---
-  let state = 'MENU'; // MENU, PLAYING, GAMEOVER
+  let state = 'MENU';
   let mode = 'ENDLESS';
   let currentSeed = Date.now();
   let rng = Math.random;
@@ -559,7 +558,6 @@
   let baseSpeed = 15;
   let speed = 15;
   let shake = 0;
-  let pulseBeat = 0;
   let hitFlash = 0;
   let invulnTimer = 0;
   let gameOverTimeout = null;
@@ -567,7 +565,7 @@
   let powerups = { slow: 0, shield: false, magnet: 0 };
   let entities = [];
   let particles = [];
-  let currentRunLog = []; // [{ t, tt, x }]
+  let currentRunLog = [];
   let activeGhostLog = [];
   let targetChallengeScore = 0;
 
@@ -816,7 +814,6 @@
     }
   });
 
-  // Clamped strictly inside [0.0, 2.0] so player cannot hide outside outer rails
   function screenXToContinuousLane(x) {
     const leftX = laneToScreenX(0, 0.08);
     const rightX = laneToScreenX(2, 0.08);
@@ -938,7 +935,6 @@
 
   function update(dt) {
     if (shake > 0) shake = Math.max(0, shake - dt * 50);
-    if (pulseBeat > 0) pulseBeat = Math.max(0, pulseBeat - dt * 4);
     if (hitFlash > 0) hitFlash = Math.max(0, hitFlash - dt * 2.5);
     if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
 
@@ -1012,9 +1008,8 @@
 
       if (!ent.passed && crossedOrInZone) {
         const laneDist = Math.abs(ent.lane - playerVisualX);
-        // 0.58 (> 0.50) ensures parking on the line between two lanes collides with obstacles in either lane
-        const hitRadius = ent.type === 'obs' ? 0.58 : 0.48;
-        if (laneDist < hitRadius) {
+        const hitRadius = ent.type === 'obs' ? 0.62 : 0.5;
+        if (laneDist <= hitRadius) {
           ent.passed = true;
           const px = laneToScreenX(playerVisualX, playerZ);
           const py = projectY(playerZ);
@@ -1074,7 +1069,7 @@
         ent.passed = true;
         if (ent.type === 'obs') {
           const laneDist = Math.abs(ent.lane - playerVisualX);
-          if (laneDist >= 0.58 && laneDist < 1.2) {
+          if (laneDist > 0.62 && laneDist < 1.2) {
             combo = Math.min(10, combo + 1);
             const bonus = 15 * combo;
             score += bonus;
@@ -1118,7 +1113,8 @@
     ctx.fillStyle = horizonGlow;
     ctx.fillRect(0, 0, width, height);
 
-    const sunRadius = Math.min(width, height) * (0.16 + pulseBeat * 0.015);
+    // Steady Synthwave Sun (no bouncing)
+    const sunRadius = Math.min(width, height) * 0.16;
     const sunGrad = ctx.createLinearGradient(0, horizonY - sunRadius, 0, horizonY + 10);
     sunGrad.addColorStop(0, currentTheme.orb);
     sunGrad.addColorStop(1, currentTheme.grid);
