@@ -816,12 +816,13 @@
     }
   });
 
+  // Clamped strictly inside [0.0, 2.0] so player cannot hide outside outer rails
   function screenXToContinuousLane(x) {
     const leftX = laneToScreenX(0, 0.08);
     const rightX = laneToScreenX(2, 0.08);
     const span = Math.max(80, rightX - leftX);
     const raw = ((x - leftX) / span) * 2;
-    return Math.max(-0.35, Math.min(2.35, raw));
+    return Math.max(0.0, Math.min(2.0, raw));
   }
 
   let activeTouchId = null;
@@ -1005,14 +1006,15 @@
         ent.lane += (playerVisualX - ent.lane) * dt * 8.5;
       }
 
-      // Swept collision check so fast dz never skips across playerZ
       const crossedOrInZone =
         (ent.z <= hitMaxZ && ent.z >= hitMinZ) ||
         (ent.prevZ > playerZ && ent.z < playerZ);
 
       if (!ent.passed && crossedOrInZone) {
         const laneDist = Math.abs(ent.lane - playerVisualX);
-        if (laneDist < 0.42) {
+        // 0.58 (> 0.50) ensures parking on the line between two lanes collides with obstacles in either lane
+        const hitRadius = ent.type === 'obs' ? 0.58 : 0.48;
+        if (laneDist < hitRadius) {
           ent.passed = true;
           const px = laneToScreenX(playerVisualX, playerZ);
           const py = projectY(playerZ);
@@ -1072,7 +1074,7 @@
         ent.passed = true;
         if (ent.type === 'obs') {
           const laneDist = Math.abs(ent.lane - playerVisualX);
-          if (laneDist >= 0.42 && laneDist < 1.2) {
+          if (laneDist >= 0.58 && laneDist < 1.2) {
             combo = Math.min(10, combo + 1);
             const bonus = 15 * combo;
             score += bonus;
