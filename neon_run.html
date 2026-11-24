@@ -120,16 +120,16 @@
     }
     #muteBtn:hover { background: var(--ball); color: #04040d; }
 
-    /* ATTRACTIVE ARCADE BACKDROP FOR OVERLAYS (ONLY BACKGROUND CHANGED) */
+    /* INTERACTIVE COLORFUL OVERLAY BACKDROP */
     .overlay {
       position: absolute; inset: 0; z-index: 20;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       background:
-        radial-gradient(circle at 50% 22%, rgba(0, 243, 255, 0.16), transparent 46%),
-        radial-gradient(circle at 18% 82%, rgba(255, 0, 127, 0.20), transparent 50%),
-        radial-gradient(circle at 82% 78%, rgba(255, 230, 0, 0.12), transparent 48%),
-        linear-gradient(180deg, rgba(6, 7, 22, 0.76) 0%, rgba(3, 4, 14, 0.90) 100%);
-      backdrop-filter: blur(5px);
+        radial-gradient(circle at var(--bg-px, 50%) var(--bg-py, 28%), rgba(0, 243, 255, 0.20), transparent 44%),
+        radial-gradient(circle at 15% 85%, rgba(255, 0, 127, 0.24), transparent 52%),
+        radial-gradient(circle at 85% 80%, rgba(255, 230, 0, 0.16), transparent 48%),
+        linear-gradient(180deg, rgba(6, 7, 24, 0.62) 0%, rgba(3, 4, 15, 0.80) 100%);
+      backdrop-filter: blur(3px);
       pointer-events: auto; padding: 20px;
       transition: opacity 0.25s ease;
     }
@@ -137,11 +137,11 @@
       content: '';
       position: absolute; inset: 0; pointer-events: none;
       background-image:
-        linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-      background-size: 44px 44px;
-      mask-image: radial-gradient(circle at center, black 35%, transparent 90%);
-      -webkit-mask-image: radial-gradient(circle at center, black 35%, transparent 90%);
+        linear-gradient(to right, rgba(0, 243, 255, 0.06) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 0, 127, 0.06) 1px, transparent 1px);
+      background-size: 40px 40px;
+      mask-image: radial-gradient(circle at var(--bg-px, 50%) var(--bg-py, 50%), black 30%, transparent 92%);
+      -webkit-mask-image: radial-gradient(circle at var(--bg-px, 50%) var(--bg-py, 50%), black 30%, transparent 92%);
     }
     .hidden { display: none !important; }
 
@@ -420,6 +420,7 @@
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
   const floatLayer = document.getElementById('floatLayer');
+  const overlays = Array.from(document.querySelectorAll('.overlay'));
 
   // --- THEMES ---
   const THEMES = [
@@ -460,13 +461,77 @@
   }
   applyThemeCSS(currentTheme);
 
-  // --- AMBIENT STARFIELD FOR BACKGROUND ---
-  const STARS = Array.from({ length: 48 }, (_, idx) => ({
+  // --- INTERACTIVE BACKGROUND STATE ---
+  const STARS = Array.from({ length: 56 }, (_, idx) => ({
     x: ((idx * 97) % 1000) / 1000,
-    y: ((idx * 53) % 450) / 1000,
-    r: 0.8 + (idx % 3) * 0.7,
-    phase: idx * 0.65
+    y: ((idx * 53) % 520) / 1000,
+    r: 0.9 + (idx % 3) * 0.75,
+    phase: idx * 0.65,
+    colorRole: idx % 3
   }));
+
+  let bgPointerNormX = 0; // -1..1
+  let bgPointerNormY = 0; // -1..1
+  let bgRipples = []; // { x, y, radius, alpha, color }
+  let bgSparkTimer = 0;
+
+  function updateBgPointer(clientX, clientY) {
+    const w = Math.max(1, window.innerWidth);
+    const h = Math.max(1, window.innerHeight);
+    bgPointerNormX = Math.max(-1, Math.min(1, (clientX / w) * 2 - 1));
+    bgPointerNormY = Math.max(-1, Math.min(1, (clientY / h) * 2 - 1));
+    const px = `${Math.round((clientX / w) * 100)}%`;
+    const py = `${Math.round((clientY / h) * 100)}%`;
+    overlays.forEach(ov => {
+      ov.style.setProperty('--bg-px', px);
+      ov.style.setProperty('--bg-py', py);
+    });
+  }
+
+  function spawnBgRipple(x, y) {
+    const palette = [currentTheme.ball, currentTheme.grid, currentTheme.orb];
+    const color = palette[bgRipples.length % palette.length];
+    bgRipples.push({ x, y, radius: 10, alpha: 0.75, color });
+    for (let i = 0; i < 8; i++) {
+      const ang = (Math.PI * 2 * i) / 8 + Math.random() * 0.3;
+      const spd = 1.6 + Math.random() * 2.8;
+      particles.push({
+        x, y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        life: 0.75,
+        color,
+        size: 3 + Math.random() * 2.5
+      });
+    }
+  }
+
+  overlays.forEach(ov => {
+    ov.addEventListener('pointermove', e => {
+      updateBgPointer(e.clientX, e.clientY);
+      bgSparkTimer -= 0.016;
+      if (bgSparkTimer <= 0) {
+        bgSparkTimer = 0.07;
+        const palette = [currentTheme.ball, currentTheme.grid, currentTheme.orb];
+        particles.push({
+          x: e.clientX,
+          y: e.clientY,
+          vx: (Math.random() - 0.5) * 1.8,
+          vy: (Math.random() - 0.5) * 1.8 - 0.6,
+          life: 0.55,
+          color: palette[Math.floor(Math.random() * palette.length)],
+          size: 2.5 + Math.random() * 2
+        });
+      }
+    });
+
+    ov.addEventListener('pointerdown', e => {
+      updateBgPointer(e.clientX, e.clientY);
+      if (e.target === ov) {
+        spawnBgRipple(e.clientX, e.clientY);
+      }
+    });
+  });
 
   // --- SEEDED PRNG ---
   function mulberry32(a) {
@@ -639,6 +704,7 @@
         saveData.theme = t.id;
         persist();
         renderThemeButtons();
+        spawnBgRipple(width * 0.5, height * 0.5);
       };
       themeSelector.appendChild(btn);
     });
@@ -704,6 +770,7 @@
     invulnTimer = 0;
     entities = [];
     particles = [];
+    bgRipples = [];
     floatLayer.innerHTML = '';
     powerups = { slow: 0, shield: false, magnet: 0 };
     currentRunLog = [{ t: 0, tt: 0, x: 1 }];
@@ -928,7 +995,7 @@
   }
 
   function laneToScreenX(laneIndex, z) {
-    const centerX = width * 0.5;
+    const centerX = width * 0.5 + (state !== 'PLAYING' ? bgPointerNormX * 14 * (1 - z) : 0);
     const scale = projectScale(z);
     const roadHalfWidth = Math.min(width * 0.44, 340) * scale;
     const laneOffset = (laneIndex - 1) * (roadHalfWidth * 0.66);
@@ -962,6 +1029,13 @@
     if (hitFlash > 0) hitFlash = Math.max(0, hitFlash - dt * 2.5);
     if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
 
+    for (let i = bgRipples.length - 1; i >= 0; i--) {
+      const rp = bgRipples[i];
+      rp.radius += dt * 190;
+      rp.alpha -= dt * 1.15;
+      if (rp.alpha <= 0) bgRipples.splice(i, 1);
+    }
+
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
       p.x += p.vx;
@@ -971,7 +1045,7 @@
     }
 
     if (state !== 'PLAYING') {
-      gridScroll = (gridScroll + dt * 0.45) % 1;
+      gridScroll = (gridScroll + dt * 0.55) % 1;
       return;
     }
 
@@ -1129,55 +1203,76 @@
       ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
     }
 
-    // Rich arcade sky gradient background
+    // Dynamic colorful arcade sky gradient
+    const hueShift = Math.sin(ambientClock * 0.8) * 18;
     const skyGrad = ctx.createLinearGradient(0, 0, 0, height);
     skyGrad.addColorStop(0, currentTheme.bg);
-    skyGrad.addColorStop(0.36, currentTheme.grid + '26');
+    skyGrad.addColorStop(0.32, currentTheme.grid + '38');
+    skyGrad.addColorStop(0.68, currentTheme.ball + '14');
     skyGrad.addColorStop(1, currentTheme.bg);
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, height);
 
-    const horizonY = height * 0.34;
+    const horizonY = height * 0.34 + (state !== 'PLAYING' ? bgPointerNormY * 8 : 0);
+    const parallaxX = state !== 'PLAYING' ? bgPointerNormX * 22 : 0;
 
-    // Twinkling arcade stars in upper sky
+    // Interactive twinkling multi-role stars
+    const starColors = [currentTheme.ball, currentTheme.orb, currentTheme.grid];
     for (const st of STARS) {
-      const tw = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(ambientClock * 2.2 + st.phase));
-      ctx.fillStyle = currentTheme.ball;
-      ctx.globalAlpha = tw * 0.55;
+      const tw = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(ambientClock * 2.8 + st.phase));
+      const sx = ((st.x * width + parallaxX * (0.4 + st.r * 0.25) + width) % width);
+      const sy = st.y * height;
+      ctx.fillStyle = starColors[st.colorRole];
+      ctx.globalAlpha = tw * 0.72;
       ctx.beginPath();
-      ctx.arc(st.x * width, st.y * height, st.r, 0, Math.PI * 2);
+      ctx.arc(sx, sy, st.r, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
 
-    const horizonGlow = ctx.createRadialGradient(width * 0.5, horizonY, 10, width * 0.5, horizonY, width * 0.58);
-    horizonGlow.addColorStop(0, currentTheme.grid + '55');
-    horizonGlow.addColorStop(0.5, currentTheme.ball + '18');
+    // Interactive background pulse rings
+    for (const rp of bgRipples) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, rp.alpha);
+      ctx.strokeStyle = rp.color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(rp.x, rp.y, rp.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const glowX = width * 0.5 + parallaxX * 1.4;
+    const horizonGlow = ctx.createRadialGradient(glowX, horizonY, 12, glowX, horizonY, width * 0.64);
+    horizonGlow.addColorStop(0, currentTheme.grid + '66');
+    horizonGlow.addColorStop(0.45, currentTheme.ball + '24');
     horizonGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = horizonGlow;
     ctx.fillRect(0, 0, width, height);
 
     // Steady Synthwave Sun
     const sunRadius = Math.min(width, height) * 0.16;
+    const sunX = width * 0.5 + parallaxX * 0.7;
     const sunGrad = ctx.createLinearGradient(0, horizonY - sunRadius, 0, horizonY + 10);
     sunGrad.addColorStop(0, currentTheme.orb);
-    sunGrad.addColorStop(1, currentTheme.grid);
+    sunGrad.addColorStop(0.65, currentTheme.grid);
+    sunGrad.addColorStop(1, currentTheme.ball);
     ctx.fillStyle = sunGrad;
     ctx.beginPath();
-    ctx.arc(width * 0.5, horizonY, sunRadius, Math.PI, 0);
+    ctx.arc(sunX, horizonY, sunRadius, Math.PI, 0);
     ctx.fill();
 
     // Distant synthwave horizon ridge silhouette
     ctx.fillStyle = currentTheme.bg;
     ctx.beginPath();
     ctx.moveTo(0, horizonY);
-    ctx.lineTo(width * 0.12, horizonY - height * 0.045);
-    ctx.lineTo(width * 0.24, horizonY - height * 0.015);
-    ctx.lineTo(width * 0.36, horizonY - height * 0.055);
-    ctx.lineTo(width * 0.5, horizonY - height * 0.02);
-    ctx.lineTo(width * 0.65, horizonY - height * 0.05);
-    ctx.lineTo(width * 0.78, horizonY - height * 0.018);
-    ctx.lineTo(width * 0.9, horizonY - height * 0.042);
+    ctx.lineTo(width * 0.12 + parallaxX * 0.5, horizonY - height * 0.045);
+    ctx.lineTo(width * 0.24 + parallaxX * 0.5, horizonY - height * 0.015);
+    ctx.lineTo(width * 0.36 + parallaxX * 0.5, horizonY - height * 0.055);
+    ctx.lineTo(width * 0.5 + parallaxX * 0.5, horizonY - height * 0.02);
+    ctx.lineTo(width * 0.65 + parallaxX * 0.5, horizonY - height * 0.05);
+    ctx.lineTo(width * 0.78 + parallaxX * 0.5, horizonY - height * 0.018);
+    ctx.lineTo(width * 0.9 + parallaxX * 0.5, horizonY - height * 0.042);
     ctx.lineTo(width, horizonY);
     ctx.closePath();
     ctx.fill();
